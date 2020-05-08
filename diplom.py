@@ -67,17 +67,21 @@ def printOpenPorts(openPorts):
         print('Порт:', port, 'Сервис:',
               portInfo['name'] + '/' + portInfo['product'], portInfo['version'])
 
+def checkVulns(port):
+    if ('script' in port):
+        if ('vulners' in port['script']):
+            return True
+    return False
 
 def printVuln(ports):
     overallOutput = ''
     for key in ports:
-        if ('script' in ports[key]):
-            if ('vulners' in ports[key]['script']):
-                output = (ports[key]['product'] + ' ' + ports[key]['version'] +
+        if (checkVulns(ports[key]) == True):
+            output = (ports[key]['product'] + ' ' + ports[key]['version'] +
                     ': ' +
-                ports[key]['script']['vulners'].replace(
+            ports[key]['script']['vulners'].replace(
                     '\t', ' ') + '\n')
-                overallOutput += output
+            overallOutput += output
     overallOutput = overallOutput.strip('\n')
     return overallOutput
 
@@ -102,19 +106,42 @@ def pad(portArray, padding=None):
     maxPort = max(portLength)
     
     for elem in portArray:
-        elem.extend([padding] * (maxPort-len(elem)))
-        newPortArray.append(elem)
+        listElem = list(elem)
+        listElem.extend([padding] * (maxPort-len(elem)))
+        newPortArray.append(listElem)
         
     return (newPortArray)
 
 
-def constructOutputDf(portArray, columnNames):
+def constructOutputDfs(portArray, columnNames, isPorts):
     portArray = pad(portArray)
+    dfArr = []
     toDataFrame = np.transpose(np.array(portArray))
-    return pd.DataFrame(
+    df = pd.DataFrame(
                 toDataFrame,
-                columns=columnNames, index=np.array([[None] * toDataFrame.shape[0]]).flatten()
+                columns=columnNames
             )
+    
+    columns = df.columns.get_level_values(0)
+    for column in columns:
+        dfArr.append(df.iloc[:, columns == column])  
+    if (isPorts == True):
+        dfArr = dfArr[::2]
+    return dfArr
+
+def constructColumnNamesTwoLvl(top, mid, bot):
+    topCol = []
+    middleCol = []
+    botCol = []
+    print(len(mid))
+    print(len(bot))
+    topCol += top * len(mid) * len(bot)
+    for elem in mid:
+        print(elem)
+        middleCol += [elem] * len(bot)
+    botCol += bot * len(mid)
+    return [np.array(topCol), np.array(middleCol), np.array(botCol)]
+    
 
 def getPortArray(ports):
     openPorts = []
@@ -130,32 +157,17 @@ def getPortArray(ports):
         )
     return (openPorts, serviceNames)
 
-
+def cleanVulnArr(allVulns):
+    newArr = []
+    for elem in allVulns:
+        newArr.append({
+            'vulns': np.char.replace(elem['vulns'].split('\t')[1:], '\n    ', ''),
+            'service': elem['service']
+        })
+    return newArr
+    
 def portScan(discoveredHosts):
-    scanResults = {
-        'Хост1': [
-            {
-                'ОС': ['a, b'],
-                'Открытые порты': [
-                    {
-                        'Порт': '1',
-                        'Сервис': '2'
-                    }
-                ],
-            }
-        ],
-        'Хост2': [
-            {
-                'ОС': ['c, d'],
-                'Открытые порты': [
-                    {
-                        'Порт': '12',
-                        'Сервис': '4'
-                    }
-                ],
-            }
-        ],
-    }
+    
     if (len(discoveredHosts) != 0):
         printDiscoveredHosts(discoveredHosts)
         option = input(
@@ -200,8 +212,13 @@ def portScan(discoveredHosts):
                                    sudo=sudo)
         print('====================================================')
         allPorts = []
+        allOs = []
         allHosts = scanner.all_hosts()
+        
+        allServiceNames = []
+        outputDfVulnArr = []
         for host in scanner.all_hosts():
+            allVulns = []
             print('----------------------------------------------------')
             print('Информация о хосте', host)
             osInfo = []
@@ -209,17 +226,50 @@ def portScan(discoveredHosts):
                 osInfo = scanner[host]['osmatch']
             if (len(osInfo) != 0):
                 print('Операционная система:')
-                for elem in osInfo[:5]:
-                    print(elem['name'], 'Достоверность:', elem['accuracy'])
+                print(osInfo[0]['name'], 'Достоверность:', osInfo[0]['accuracy'])
             if (len(scanner[host].all_protocols()) == 0):
                 print('Открытых портов не обнаружено')
                 allHosts.remove(host)
             else:
                 ports = scanResults['scan'][host][scanObject['type']]
+                for key in ports:
+                    if (checkVulns(ports[key]) == True):
+                        allVulns.append({
+                            'vulns': ports[key]['script']['vulners'], 
+                            'service': ports[key]['name'] + '/' + ports[key]['product'] + ' ' + ports[key]['version']
+                        })
+                
+                if (len(allVulns) != 0):
+                    allVulns = cleanVulnArr(allVulns)
+                    vulnArr = []
+                    vulnServiceArr = []
+                    for elem in allVulns:
+                        vulnArr.append(elem['vulns'])
+                        vulnServiceArr.append(elem['service'])
+                    
+                    vulnSplitArr = []
+                    for elem in vulnArr:
+                        ids = []
+                        danger = []
+                        refs = []
+                        ids.extend(elem[0::3])
+                        danger.extend(elem[1::3])
+                        refs.extend(elem[2::3])
+                        vulnSplitArr.extend([ids, danger, refs])
+                    
+                        
+                    
+                    vulnSplitArr = pad(vulnSplitArr)
+                    columnVulnNames = constructColumnNamesTwoLvl([host], vulnServiceArr, ['Идентификатор', 'Критичность', 'Об уязвимости'])
+                    vulnDf = pd.DataFrame(np.transpose(vulnSplitArr), columns=columnVulnNames)
+                    outputDfVulnArr.append(vulnDf)
+                
                 portArray, serviceArray = getPortArray(ports)
                 allPorts.append(portArray)
                 allPorts.append(serviceArray)
-                
+                allServiceNames += serviceArray
+                if (len(osInfo) != 0):
+                    allOs.append([osInfo[0]['name']])
                 print('Открытые порты:')
                 printOpenPorts(ports)
                 
@@ -227,13 +277,18 @@ def portScan(discoveredHosts):
                 if (vulnOutput != ''):
                     print('Уязвимости сервисов:')
                     print(vulnOutput)
-        print(allPorts)
-        columnNames = constructColumnNames(allHosts, ['Открытый порт', 'Сервис'])
-        outputDf = constructOutputDf(allPorts, columnNames)
-        print(outputDf)
+        
+        columnPortNames = constructColumnNames(allHosts, ['Открытый порт', 'Сервис'])
+        columnOSNames = allHosts
+        outputDfOSArr = []
+        outputDfPortArr = []
+        if (len(allPorts) != 0):
+            outputDfPortArr = constructOutputDfs(allPorts, columnPortNames, isPorts=True)
+        if (len(allOs) != 0):
+            outputDfOSArr = constructOutputDfs(allOs, columnOSNames, isPorts=False)
         print('----------------------------------------------------')
         print('====================================================')
-        return outputDf
+        return outputDfPortArr, outputDfOSArr,outputDfVulnArr 
 
 def scanExplanation():
     with open('./scanExplanation') as file:
@@ -243,9 +298,38 @@ def scanExplanation():
 
 def printDiscoveredHosts(discoveredHosts):
     print('Хосты, доступные для сканирования (по результатам предыдущей проверки):\n' +
-          ', '.join(discoveredHosts))
+          '\n'.join(discoveredHosts))
 
+def adjustColWidth(excelFile):
+    workbook = openpyxl.load_workbook(excelFile)
+    for sheet in workbook.worksheets:
+        for col in sheet.columns:
+            unmerged_cells = list(filter(lambda cell_to_check: cell_to_check.coordinate not in sheet.merged_cells, col))
+            max_length = 0
+            for cell in col:
+                cell.alignment = openpyxl.styles.Alignment(horizontal='center')
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(cell.value)
+                except:
+                    pass
+            adjusted_width = (max_length + 4)
+            sheet.column_dimensions[unmerged_cells[0].column_letter].width = adjusted_width
+    workbook.save(excelFile)
+  
+def outputToExcel(writer, data, sheet, spacing):
+    overallRows = 0
+    for df in data:
+        df.to_excel(writer, sheet_name=sheet, startrow=overallRows, startcol=0)
+        overallRows += len(df) + spacing
 
+def makeScanReport(outputs):
+    sheets = ['Отчёт по портам', 'Отчёт по ОС']
+    writer = pd.ExcelWriter('result.xlsx', engine='xlsxwriter')
+    for output in outputs:
+        outputToExcel(writer, output['output'], output['sheet'], output['spacing'])
+    writer.save()
+    
 def mainProgram():
     discoveredHosts = []
     while(1):
@@ -261,8 +345,26 @@ def mainProgram():
         if (option == '1'):
             discoveredHosts = discoverHosts()
         elif (option == '2'):
-            output = portScan(discoveredHosts)
-            output.to_excel('result.xlsx')
+            outputPortArr, outputOSArr, outputVulnArr = portScan(discoveredHosts)
+            makeScanReport([
+                {
+                    'sheet': 'Отчёт по портам', 
+                    'output': outputPortArr,
+                    'spacing': 5
+                },
+                {
+                    'sheet': 'Отчёт по ОС', 
+                    'output': outputOSArr,
+                    'spacing': 3
+                },
+                {
+                    'sheet': 'Отчёт по уязвимостям',
+                    'output': outputVulnArr,
+                    'spacing': 10
+                }
+            ])
+            
+            adjustColWidth('result.xlsx')    
         elif (option == '3'):
             scanExplanation()
         else:
@@ -270,31 +372,8 @@ def mainProgram():
             return 1
 
 
-#mainProgram()
-           
-            
-workbook = openpyxl.load_workbook('result.xlsx')
-worksheet = workbook.active
-for col in worksheet.columns:
-    unmerged_cells = list(filter(lambda cell_to_check: cell_to_check.coordinate not in worksheet.merged_cells, col))
-    max_length = 0
-    column = unmerged_cells[0].column_letter # Get the column name
-    for cell in col:
-        cell.alignment = openpyxl.styles.Alignment(horizontal='center')
-        try: # Necessary to avoid error on empty cells
-            if len(str(cell.value)) > max_length:
-                max_length = len(cell.value)
-        except:
-            pass
-    adjusted_width = (max_length + 2) * 1.1
-    worksheet.column_dimensions[unmerged_cells[0].column_letter].width = adjusted_width
-workbook.save('result.xlsx')
-'''
-arrays = [np.array(['192.168.0.1', '192.168.0.1', '1.68.0.1', '1.68.0.1']), np.array(['Открытые порты', 'Сервисы', 'Открытые порты', 'Сервисы'])]
-scanResults = {
-        
-    }
+mainProgram()
 
-df = pd.DataFrame(np.random.randn(4, 4), columns=arrays)
-print(df)
-'''
+#columns = [np.array(['first', 'first', 'first', 'first', 'first', 'first','first', 'first', 'first']), np.array(['1', '1', '1', '2', '2', '2', '3', '3', '3']), np.array(['one', 'two', 'three', 'one', 'two', 'three', 'one', 'two', 'three'])]
+#columns = constructColumnNamesTwoLvl(['first'], ['1', '2', '3'], ['one', 'two', 'three'])
+#df = pd.DataFrame(np.random.randn(1, 9), columns=columns)
