@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import nmap
 import openpyxl
+import datetime
 
 PORT_SCANS = [
     {
@@ -44,7 +45,7 @@ def setScanFeatures():
 
 
 def discoverHosts():
-    print('Введите диапазон Ip адресов для проверки')
+    print('Введите диапазон Ip адресов для проверки:')
     ipInterval = input()
     scanner.scan(hosts=ipInterval, arguments='-sn', sudo=True)
     print('Произвожу разведывание хостов...')
@@ -167,21 +168,39 @@ def cleanVulnArr(allVulns):
     return newArr
     
 def portScan(discoveredHosts):
-    
-    if (len(discoveredHosts) != 0):
-        printDiscoveredHosts(discoveredHosts)
-        option = input(
-            'Желаете выполнить сканирование хоста из списка доступных? (y/n) ')
-        if (option == 'y'):
-            hostIndex = input('Введите номер хоста из списка: ')
-            if (hostIndex == 'all'):
-                host = ' '.join(discoveredHosts)
-            else:
-                host = discoveredHosts[int(hostIndex) - 1]
-        else:
-            host = input('Введите Ip адрес(a) хоста(ов) для сканирования: ')
+    file = ''
+    host = []
+    fromFile = input('Желаете просканировать адреса из файла? (y/n) ')
+    if (fromFile == 'y'):
+        file = input('Укажите путь к файлу:\n')
+    if (file != ''):
+       with open(file) as hosts:
+           for line in hosts:
+               host.append(line)
+       host = (' '.join(host)).replace('\n', '')
     else:
-        host = input('Введите Ip адрес хоста для сканирования: ')
+        if (len(discoveredHosts) != 0):
+            printDiscoveredHosts(discoveredHosts)
+            option = input(
+                'Желаете выполнить сканирование хоста из списка доступных? (y/n) ')
+            if (option == 'y'):
+                inputString = input('Введите номер хоста или диапазон хостов из списка: ')
+                if (inputString == 'all'):
+                    host = ' '.join(discoveredHosts)
+                else:
+                    hostIndex = inputString.split('-')
+                    if len(hostIndex) == 2:
+                        host = ' '.join(discoveredHosts[int(hostIndex[0]) - 1:int(hostIndex[1])])
+                    elif len(hostIndex) == 1:
+                        host = discoveredHosts[int(hostIndex[0]) - 1]
+                    else:
+                        print('Неверный формат')
+                        return
+                    
+            else:
+                host = input('Введите Ip адрес(a) хоста(ов) для сканирования: ')
+        else:
+            host = input('Введите Ip адрес хоста для сканирования: ')
 
     scanType = input(
         '''
@@ -202,7 +221,7 @@ def portScan(discoveredHosts):
             sudo = True
         else:
             sudo = scanObject['sudo']
-
+        hostArr = host.split(' ')
         print('Произвожу', scanObject['name'],
               'сканирование следующих хостов:\n' + host.replace(' ', '\n'))
         scanResults = scanner.scan(hosts=host,
@@ -214,81 +233,96 @@ def portScan(discoveredHosts):
         allPorts = []
         allOs = []
         allHosts = scanner.all_hosts()
-        
+        noOpenPorts = []
         allServiceNames = []
         outputDfVulnArr = []
-        for host in scanner.all_hosts():
-            allVulns = []
-            print('----------------------------------------------------')
-            print('Информация о хосте', host)
-            osInfo = []
-            if ('osmatch' in scanner[host]):
-                osInfo = scanner[host]['osmatch']
-            if (len(osInfo) != 0):
-                print('Операционная система:')
-                print(osInfo[0]['name'], 'Достоверность:', osInfo[0]['accuracy'])
-            if (len(scanner[host].all_protocols()) == 0):
-                print('Открытых портов не обнаружено')
-                allHosts.remove(host)
+        for host in hostArr:
+            if (host not in scanner.all_hosts()):
+                print('----------------------------------------------------')
+                print('Информация о хосте', host)
+                print('Хост не активен')
             else:
-                ports = scanResults['scan'][host][scanObject['type']]
-                for key in ports:
-                    if (checkVulns(ports[key]) == True):
-                        allVulns.append({
-                            'vulns': ports[key]['script']['vulners'], 
-                            'service': ports[key]['name'] + '/' + ports[key]['product'] + ' ' + ports[key]['version']
-                        })
-                
-                if (len(allVulns) != 0):
-                    allVulns = cleanVulnArr(allVulns)
-                    vulnArr = []
-                    vulnServiceArr = []
-                    for elem in allVulns:
-                        vulnArr.append(elem['vulns'])
-                        vulnServiceArr.append(elem['service'])
-                    
-                    vulnSplitArr = []
-                    for elem in vulnArr:
-                        ids = []
-                        danger = []
-                        refs = []
-                        ids.extend(elem[0::3])
-                        danger.extend(elem[1::3])
-                        refs.extend(elem[2::3])
-                        vulnSplitArr.extend([ids, danger, refs])
-                    
-                        
-                    
-                    vulnSplitArr = pad(vulnSplitArr)
-                    columnVulnNames = constructColumnNamesTwoLvl([host], vulnServiceArr, ['Идентификатор', 'Критичность', 'Об уязвимости'])
-                    vulnDf = pd.DataFrame(np.transpose(vulnSplitArr), columns=columnVulnNames)
-                    outputDfVulnArr.append(vulnDf)
-                
-                portArray, serviceArray = getPortArray(ports)
-                allPorts.append(portArray)
-                allPorts.append(serviceArray)
-                allServiceNames += serviceArray
+                allVulns = []
+                print('----------------------------------------------------')
+                print('Информация о хосте', host)
+                osInfo = []
+                if ('osmatch' in scanner[host]):
+                    osInfo = scanner[host]['osmatch']
                 if (len(osInfo) != 0):
-                    allOs.append([osInfo[0]['name']])
-                print('Открытые порты:')
-                printOpenPorts(ports)
-                
-                vulnOutput = printVuln(ports)
-                if (vulnOutput != ''):
-                    print('Уязвимости сервисов:')
-                    print(vulnOutput)
+                    print('Операционная система:')
+                    print(osInfo[0]['name'], 'Достоверность:', osInfo[0]['accuracy'])
+                if (len(scanner[host].all_protocols()) == 0):
+                    print('Открытых портов не обнаружено')
+                    noOpenPorts.append(host)
+                    allHosts.remove(host)
+                else:
+                    ports = scanResults['scan'][host][scanObject['type']]
+                    for key in ports:
+                        if (checkVulns(ports[key]) == True):
+                            allVulns.append({
+                                'vulns': ports[key]['script']['vulners'], 
+                                'service': ports[key]['name'] + '/' + ports[key]['product'] + ' ' + ports[key]['version']
+                            })
+                    
+                    if (len(allVulns) != 0):
+                        allVulns = cleanVulnArr(allVulns)
+                        vulnArr = []
+                        vulnServiceArr = []
+                        for elem in allVulns:
+                            vulnArr.append(elem['vulns'])
+                            vulnServiceArr.append(elem['service'])
+                        
+                        vulnSplitArr = []
+                        for elem in vulnArr:
+                            ids = []
+                            danger = []
+                            refs = []
+                            ids.extend(elem[0::3])
+                            danger.extend(elem[1::3])
+                            refs.extend(elem[2::3])
+                            vulnSplitArr.extend([ids, danger, refs])
+                        
+                            
+                        
+                        vulnSplitArr = pad(vulnSplitArr)
+                        columnVulnNames = constructColumnNamesTwoLvl([host], vulnServiceArr, ['Идентификатор', 'Критичность', 'Об уязвимости'])
+                        vulnDf = pd.DataFrame(np.transpose(vulnSplitArr), columns=columnVulnNames)
+                        outputDfVulnArr.append(vulnDf)
+                    
+                    portArray, serviceArray = getPortArray(ports)
+                    allPorts.append(portArray)
+                    allPorts.append(serviceArray)
+                    allServiceNames += serviceArray
+                    if (len(osInfo) != 0):
+                        allOs.append([osInfo[0]['name']])
+                    print('Открытые порты:')
+                    printOpenPorts(ports)
+                    
+                    vulnOutput = printVuln(ports)
+                    if (vulnOutput != ''):
+                        print('Уязвимости сервисов:')
+                        print(vulnOutput)
         
         columnPortNames = constructColumnNames(allHosts, ['Открытый порт', 'Сервис'])
         columnOSNames = allHosts
         outputDfOSArr = []
         outputDfPortArr = []
+        outputNoOpenPorts = pd.DataFrame(
+                {
+                    'Без открытых портов': noOpenPorts
+                })
         if (len(allPorts) != 0):
             outputDfPortArr = constructOutputDfs(allPorts, columnPortNames, isPorts=True)
         if (len(allOs) != 0):
             outputDfOSArr = constructOutputDfs(allOs, columnOSNames, isPorts=False)
         print('----------------------------------------------------')
         print('====================================================')
-        return outputDfPortArr, outputDfOSArr,outputDfVulnArr 
+        return (
+                outputDfPortArr, 
+                outputDfOSArr, 
+                outputDfVulnArr, 
+                [outputNoOpenPorts]
+                )
 
 def scanExplanation():
     with open('./scanExplanation') as file:
@@ -320,15 +354,19 @@ def adjustColWidth(excelFile):
 def outputToExcel(writer, data, sheet, spacing):
     overallRows = 0
     for df in data:
+        df.index = df.index + 1
+        if sheet != 'Отчёт по уязвимостям':
+            df.dropna(inplace=True)
         df.to_excel(writer, sheet_name=sheet, startrow=overallRows, startcol=0)
         overallRows += len(df) + spacing
 
 def makeScanReport(outputs):
-    sheets = ['Отчёт по портам', 'Отчёт по ОС']
-    writer = pd.ExcelWriter('result.xlsx', engine='xlsxwriter')
+    now = datetime.datetime.now()
+    writer = pd.ExcelWriter('result' + now.strftime("%Y-%m-%d;%H:%M:%S") + '.xlsx', engine='xlsxwriter')
     for output in outputs:
         outputToExcel(writer, output['output'], output['sheet'], output['spacing'])
     writer.save()
+    adjustColWidth('result' + now.strftime("%Y-%m-%d;%H:%M:%S") + '.xlsx')
     
 def mainProgram():
     discoveredHosts = []
@@ -345,7 +383,7 @@ def mainProgram():
         if (option == '1'):
             discoveredHosts = discoverHosts()
         elif (option == '2'):
-            outputPortArr, outputOSArr, outputVulnArr = portScan(discoveredHosts)
+            outputPortArr, outputOSArr, outputVulnArr, noOpenPorts = portScan(discoveredHosts)
             makeScanReport([
                 {
                     'sheet': 'Отчёт по портам', 
@@ -360,12 +398,17 @@ def mainProgram():
                 {
                     'sheet': 'Отчёт по уязвимостям',
                     'output': outputVulnArr,
-                    'spacing': 10
+                    'spacing': 7
+                },
+                {
+                    'sheet': 'Без открытых портов',
+                    'output': noOpenPorts,
+                    'spacing': 0
                 }
             ])
-            
-            adjustColWidth('result.xlsx')    
-        elif (option == '3'):
+             
+               
+        elif (option == '4'):
             scanExplanation()
         else:
             print('Произведён выход из программы')
