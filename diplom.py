@@ -174,10 +174,14 @@ def portScan(discoveredHosts):
     if (fromFile == 'y'):
         file = input('Укажите путь к файлу:\n')
     if (file != ''):
-       with open(file) as hosts:
-           for line in hosts:
-               host.append(line)
-       host = (' '.join(host)).replace('\n', '')
+        try:
+            with open(file) as hosts:
+                for line in hosts:
+                    host.append(line)
+            host = (' '.join(host)).replace('\n', '')
+        except:
+            print('Неверный путь')
+            return
     else:
         if (len(discoveredHosts) != 0):
             printDiscoveredHosts(discoveredHosts)
@@ -189,11 +193,14 @@ def portScan(discoveredHosts):
                     host = ' '.join(discoveredHosts)
                 else:
                     hostIndex = inputString.split('-')
-                    if len(hostIndex) == 2:
-                        host = ' '.join(discoveredHosts[int(hostIndex[0]) - 1:int(hostIndex[1])])
-                    elif len(hostIndex) == 1:
-                        host = discoveredHosts[int(hostIndex[0]) - 1]
-                    else:
+                    try:
+                        if len(hostIndex) == 2:
+                            host = ' '.join(discoveredHosts[int(hostIndex[0]) - 1:int(hostIndex[1])])
+                        elif len(hostIndex) == 1:
+                            host = discoveredHosts[int(hostIndex[0]) - 1]
+                        elif len(hostIndex > 2):
+                            raise
+                    except:
                         print('Неверный формат')
                         return
                     
@@ -383,32 +390,34 @@ def mainProgram():
         if (option == '1'):
             discoveredHosts = discoverHosts()
         elif (option == '2'):
-            outputPortArr, outputOSArr, outputVulnArr, noOpenPorts = portScan(discoveredHosts)
-            makeScanReport([
-                {
-                    'sheet': 'Отчёт по портам', 
-                    'output': outputPortArr,
-                    'spacing': 5
-                },
-                {
-                    'sheet': 'Отчёт по ОС', 
-                    'output': outputOSArr,
-                    'spacing': 3
-                },
-                {
-                    'sheet': 'Отчёт по уязвимостям',
-                    'output': outputVulnArr,
-                    'spacing': 7
-                },
-                {
-                    'sheet': 'Без открытых портов',
-                    'output': noOpenPorts,
-                    'spacing': 0
-                }
-            ])
-             
+            try:
+                outputPortArr, outputOSArr, outputVulnArr, noOpenPorts = portScan(discoveredHosts)
+                makeScanReport([
+                    {
+                        'sheet': 'Отчёт по портам', 
+                        'output': outputPortArr,
+                        'spacing': 5
+                    },
+                    {
+                        'sheet': 'Отчёт по ОС', 
+                        'output': outputOSArr,
+                        'spacing': 3
+                    },
+                    {
+                        'sheet': 'Отчёт по уязвимостям',
+                        'output': outputVulnArr,
+                        'spacing': 7
+                    },
+                    {
+                        'sheet': 'Без открытых портов',
+                        'output': noOpenPorts,
+                        'spacing': 0
+                    }
+                ])
+            except:
+                 pass
                
-        elif (option == '4'):
+        elif (option == '3'):
             scanExplanation()
         else:
             print('Произведён выход из программы')
@@ -417,6 +426,3 @@ def mainProgram():
 
 mainProgram()
 
-#columns = [np.array(['first', 'first', 'first', 'first', 'first', 'first','first', 'first', 'first']), np.array(['1', '1', '1', '2', '2', '2', '3', '3', '3']), np.array(['one', 'two', 'three', 'one', 'two', 'three', 'one', 'two', 'three'])]
-#columns = constructColumnNamesTwoLvl(['first'], ['1', '2', '3'], ['one', 'two', 'three'])
-#df = pd.DataFrame(np.random.randn(1, 9), columns=columns)
